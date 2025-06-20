@@ -1,0 +1,95 @@
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import models, transforms
+from PIL import Image
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+# Load CSV data and rename first column to 'label'
+train=r'C:\Users\admin\Downloads\oxford_pets_filtered'
+validation=r'C:\Users\admin\Downloads\oxford_pets_filtered'
+df.columns = ['label'] + [f'pixel{i}' for i in range(784)]
+
+# Separate labels and image data
+labels = df['label'].astype(int).values
+images = df.drop(columns=['label']).values.reshape(-1, 28, 28)
+
+# Custom Dataset
+class MNISTDataset(Dataset):
+    def __init__(self, images, labels, transform=None):
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = Image.fromarray(self.images[idx].astype(np.uint8))  # Grayscale PIL Image
+        if self.transform:
+            image = self.transform(image)
+        label = self.labels[idx]
+        return image, label
+
+# Transform: Resize, Convert to 3 Channels, Normalize
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.Grayscale(num_output_channels=3),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+# Split dataset
+X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.2, random_state=42)
+
+# Loaders
+train_dataset = MNISTDataset(X_train, y_train, transform)
+test_dataset = MNISTDataset(X_test, y_test, transform)
+
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32)
+
+# Load pretrained ResNet18 and modify final layer
+model = models.resnet18(pretrained=True)
+for param in model.parameters():
+    param.requires_grad = False
+
+model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST has 10 classes
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+
+# Define loss and optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.fc.parameters(), lr=0.001)
+
+# Training loop
+num_epochs = 3
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+    for inputs, targets in train_loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss:.4f}")
+
+# Evaluation
+model.eval()
+correct = 0
+total = 0
+with torch.no_grad():
+    for inputs, targets in test_loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+        outputs = model(inputs)
+        _, predicted = torch.max(outputs, 1)
+        total += targets.size(0)
+        correct += (predicted == targets).sum().item()
+
+print(f"Test Accuracy: {100 * correct / total:.2f}%")
