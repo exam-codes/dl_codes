@@ -1,0 +1,90 @@
+#Classifying reuters dataset
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow import keras
+from tensorflow.keras import layers
+
+from tensorflow.keras.datasets import reuters
+
+# Load dataset (top 10,000 most common words only)
+(x_train, y_train), (x_test, y_test) = reuters.load_data(num_words=10000)
+
+print(f"Training samples: {len(x_train)}")
+print(f"Testing samples: {len(x_test)}")
+print(f"Number of classes: {np.max(y_train) + 1}")
+
+# View the first article (as a list of word indexes)
+print("First article (word indexes):", x_train[0])
+
+# View its label
+print("First article label (category):", y_train[0])
+
+# Decode the article (convert word indexes into words)
+word_index = reuters.get_word_index()
+reverse_word_index = {value: key for key, value in word_index.items()}
+
+# Decode first article
+decoded_newswire = ' '.join([reverse_word_index.get(i - 3, '?') for i in x_train[0]])
+print("\nDecoded article:\n", decoded_newswire)
+
+
+# Function to vectorize input
+def vectorize_sequences(sequences, dimension=10000):
+    results = np.zeros((len(sequences), dimension))
+    for i, sequence in enumerate(sequences):
+        results[i, sequence] = 1.0
+    return results
+
+# Vectorize articles
+x_train = vectorize_sequences(x_train)
+x_test = vectorize_sequences(x_test)
+
+# One-hot encode labels
+y_train = keras.utils.to_categorical(y_train)
+y_test = keras.utils.to_categorical(y_test)
+
+model = keras.Sequential([
+    layers.Dense(512, activation='relu', input_shape=(10000,)),
+    layers.Dropout(0.5),
+    layers.Dense(256, activation='relu'),
+    layers.Dropout(0.5),
+    layers.Dense(46, activation='softmax')
+])
+
+model.compile(optimizer='adam',
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+history = model.fit(
+    x_train,
+    y_train,
+    epochs=30,
+    batch_size=512,
+    validation_split=0.2, # 20% of training data for validation
+    verbose=2
+)
+
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+epochs = range(1, len(acc) + 1)
+
+# Accuracy
+plt.plot(epochs, acc, 'bo', label='Training acc')
+plt.plot(epochs, val_acc, 'b', label='Validation acc')
+plt.title('Training and Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+
+# Loss
+plt.plot(epochs, loss, 'bo', label='Training loss')
+plt.plot(epochs, val_loss, 'b', label='Validation loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+
+plt.legend()
+plt.show()
