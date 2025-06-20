@@ -1,95 +1,102 @@
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from torchvision import models, transforms
-from PIL import Image
-import numpy as np
-from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms, models
+import matplotlib.pyplot as plt
+import os
 
-# Load CSV data and rename first column to 'label'
-train=r'C:\Users\admin\Downloads\oxford_pets_filtered'
-validation=r'C:\Users\admin\Downloads\oxford_pets_filtered'
-df.columns = ['label'] + [f'pixel{i}' for i in range(784)]
+# Paths to train and validation folders
+train_dir = r"C:\Users\intel\Desktop\oxford_pets_filtered\train"
+val_dir = r"C:\Users\intel\Desktop\oxford_pets_filtered\validation"
 
-# Separate labels and image data
-labels = df['label'].astype(int).values
-images = df.drop(columns=['label']).values.reshape(-1, 28, 28)
-
-# Custom Dataset
-class MNISTDataset(Dataset):
-    def __init__(self, images, labels, transform=None):
-        self.images = images
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        image = Image.fromarray(self.images[idx].astype(np.uint8))  # Grayscale PIL Image
-        if self.transform:
-            image = self.transform(image)
-        label = self.labels[idx]
-        return image, label
-
-# Transform: Resize, Convert to 3 Channels, Normalize
+# Image transformations
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
-    transforms.Grayscale(num_output_channels=3),
     transforms.ToTensor(),
-    transforms.Normalize([0.5]*3, [0.5]*3)
+    transforms.Normalize([0.5] * 3, [0.5] * 3)
 ])
 
-# Split dataset
-X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.2, random_state=42)
+# Load datasets from folders
+train_dataset = datasets.ImageFolder(root=train_dir, transform=transform)
+val_dataset = datasets.ImageFolder(root=val_dir, transform=transform)
 
-# Loaders
-train_dataset = MNISTDataset(X_train, y_train, transform)
-test_dataset = MNISTDataset(X_test, y_test, transform)
-
+# Dataloaders
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32)
+val_loader = DataLoader(val_dataset, batch_size=32)
 
-# Load pretrained ResNet18 and modify final layer
+# Load ResNet18 pretrained model
 model = models.resnet18(pretrained=True)
 for param in model.parameters():
-    param.requires_grad = False
+    param.requires_grad = False  # Freeze all layers
 
-model.fc = nn.Linear(model.fc.in_features, 10)  # MNIST has 10 classes
+# Replace the final classification layer
+num_classes = len(train_dataset.classes)
+model.fc = nn.Linear(model.fc.in_features, num_classes)
+
+# Move model to device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
-# Define loss and optimizer
+# Loss function and optimizer
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.fc.parameters(), lr=0.001)
 
-# Training loop
+# Training settings
 num_epochs = 3
+train_losses = []
+val_accuracies = []
+
+# Training loop
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
-    for inputs, targets in train_loader:
-        inputs, targets = inputs.to(device), targets.to(device)
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
         optimizer.zero_grad()
         outputs = model(inputs)
-        loss = criterion(outputs, targets)
+        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss:.4f}")
 
-# Evaluation
-model.eval()
-correct = 0
-total = 0
-with torch.no_grad():
-    for inputs, targets in test_loader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        outputs = model(inputs)
-        _, predicted = torch.max(outputs, 1)
-        total += targets.size(0)
-        correct += (predicted == targets).sum().item()
+    train_losses.append(total_loss)
 
-print(f"Test Accuracy: {100 * correct / total:.2f}%")
+    # Validation
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    accuracy = 100 * correct / total
+    val_accuracies.append(accuracy)
+
+    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss:.4f}, Val Accuracy: {accuracy:.2f}%")
+
+# Plotting Loss and Accuracy
+epochs = range(1, num_epochs + 1)
+
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(epochs, train_losses, 'bo-', label='Training Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs, val_accuracies, 'go-', label='Validation Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy (%)')
+plt.title('Validation Accuracy')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
