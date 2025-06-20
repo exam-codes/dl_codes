@@ -111,3 +111,5 @@ plt.title("Generated Images by GAN")
 plt.imshow(grid.permute(1, 2, 0))
 plt.axis("off")
 plt.show()
+
+
